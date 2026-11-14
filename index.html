@@ -210,6 +210,7 @@ body.lab-open #menuBtn,body.lab-open #zoomCtl,body.lab-open #scaleHud,body.lab-o
 #labTools{display:flex;justify-content:space-between;align-items:center;gap:10px;font:11px/1.35 var(--f-mono);color:var(--ink-faint)}
 #labTools button{flex:none;height:30px;padding:0 10px;border:1px solid var(--panel-line);border-radius:7px;background:none;color:var(--ink-dim);font:500 11.5px var(--f-mono);cursor:pointer}
 #labTools button[aria-pressed=true]{color:#fff;background:rgba(255,63,210,.16);border-color:var(--magenta)}
+#labHint{margin:0;font:11.5px/1.45 var(--f-mono);color:var(--ink-faint)}
 #labKey{display:flex;flex-wrap:wrap;gap:4px 14px;font:11px var(--f-mono);color:var(--ink-dim)}
 #labKey i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 #labStats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
@@ -376,13 +377,15 @@ body.lab-open #menuBtn,body.lab-open #zoomCtl,body.lab-open #scaleHud,body.lab-o
       <span class="pin"></span><span class="bar"></span><span class="tag tb"></span><span class="tag ta"></span><span class="msg"></span>
       <input id="labRange" type="range" min="0" max="100" value="50" step="0.5" aria-label="Slide to compare before and after"></div>
     <div id="labTools"><span id="labCap"></span><button id="labDiff" type="button" aria-pressed="true">Change map</button></div>
+    <p id="labHint"></p>
     <div id="labKey"></div>
     <div id="labStats"></div>
     <section><h3>What the radar is telling us</h3><div id="labStory"></div></section>
     <section><h3>Radar passes over this spot</h3><div id="labPass"></div></section>
     <details><summary>Method and limits</summary><ul>
       <li><b>Data.</b> NASA OPERA products made from Sentinel-1 C-band synthetic aperture radar (5.5 cm wavelength, VV and VH polarisation), served by NASA GIBS. Pass dates come from NASA's Common Metadata Repository.</li>
-      <li><b>Water.</b> OPERA DSWx-S1 classifies each 30 m pixel as water or not. EarthPulse counts water pixels in the pass before and the pass after the event and converts them to km².</li>
+      <li><b>Water.</b> OPERA DSWx-S1 classifies each 30 m pixel. EarthPulse counts only the open-water class (blue) in the pass before and the pass after, and converts the difference to km². The product also marks partial and vegetated water in other colours; those are left out, so the figure is a floor, not a ceiling.</li>
+      <li><b>Permanent water.</b> Sea, lakes and reservoirs appear in both passes and cancel out. Judge a case by the new-water figure, never by the total.</li>
       <li><b>Radar.</b> OPERA RTC-S1 is terrain-corrected backscatter. EarthPulse smooths speckle, subtracts before from after and flags pixels whose brightness changed strongly.</li>
       <li><b>Limits.</b> Figures are a screening estimate at preview resolution, not a survey. Wind-roughened water, wet soil, crops being harvested and steep terrain can all look like change. C-band radar cannot see water under dense forest or between tall buildings. The pass after an event may come days later.</li>
     </ul></details>
@@ -1422,7 +1425,7 @@ function fillCard(e) {
   else if (e.sev) m.push(['Severity', e.sev]);
   else if (e.mag != null) m.push(['Magnitude', e.mag + ' ' + (e.unit || '')]);
   const ar = e.detail && e.detail.km2 ? { km2: e.detail.km2, kind: 'measured' } : e.ar;
-  if (ar) m.push([ar.kind === 'measured' ? 'Area' : 'Est. area', '≈ ' + fmtKm2(ar.km2).toLocaleString('en-GB') + ' km²' + (ar.kind === 'est' ? ' (approx.)' : '')]);
+  if (ar) m.push([ar.kind === 'measured' ? 'Area' : 'Est. impact zone', '≈ ' + fmtKm2(ar.km2).toLocaleString('en-GB') + ' km²' + (ar.kind === 'est' ? ' (approx.)' : '')]);
   if (e.country) m.push(['Country', e.country]);
   m.push(['Time', new Date(e.t).toLocaleString('en-GB') + ' (' + ago(e.t) + ')'], ['Location', e.lat.toFixed(2) + '°, ' + e.lon.toFixed(2) + '°'], ['Source', e.src]);
   const dl = evCard.querySelector('dl'); dl.textContent = '';
@@ -2002,6 +2005,10 @@ function labAnalyse(r) {
     return { kind: 'optical', ca: cl(A), cb: B ? cl(B) : null };
   }
   const img = labCD.createImageData(n, n), o = img.data;
+  let ca = 0, cb = 0;
+  for (let i = 3; i < A.length; i += 4) if (A[i] > 8) ca++;
+  if (B) for (let i = 3; i < B.length; i += 4) if (B[i] > 8) cb++;
+  const cov = { covA: ca / N, covB: B ? cb / N : null };
   if (r.L.water) {
     const mask = !!B; // with two passes, count only where both of them carry data
     let wa = 0, wb = 0, gain = 0, loss = 0, valid = 0;
@@ -2012,10 +2019,10 @@ function labAnalyse(r) {
       if (a && !b) { gain++; o[i] = 255; o[i + 1] = 63; o[i + 2] = 140; o[i + 3] = 235; }
       else if (b && !a) { loss++; o[i] = 255; o[i + 1] = 209; o[i + 2] = 102; o[i + 3] = 235; }
     }
-    if (valid < 0.2 * N) return { kind: 'water', thin: 1, overlap: valid / N, both: !!B };
-    return { kind: 'water', img, wa: wa * px, wb: B ? wb * px : null, gain: gain * px, loss: loss * px, view: valid * px, overlap: valid / N };
+    if (valid < 0.2 * N) return { kind: 'water', thin: 1, overlap: valid / N, both: !!B, ...cov };
+    return { kind: 'water', img, ...cov, wa: wa * px, wb: B ? wb * px : null, gain: gain * px, loss: loss * px, view: valid * px, overlap: valid / N };
   }
-  if (!B) return { kind: 'radar', single: 1 };
+  if (!B) return { kind: 'radar', single: 1, ...cov };
   const la = new Float32Array(N), lb = new Float32Array(N);
   for (let p = 0, i = 0; p < N; p++, i += 4) { la[p] = 0.3 * A[i] + 0.6 * A[i + 1] + 0.1 * A[i + 2]; lb[p] = 0.3 * B[i] + 0.6 * B[i + 1] + 0.1 * B[i + 2]; }
   const sa = labBlur(la, n), sb = labBlur(lb, n); let dark = 0, bright = 0, valid = 0;
@@ -2025,8 +2032,8 @@ function labAnalyse(r) {
     if (d < -38) { dark++; o[i] = 77; o[i + 1] = 155; o[i + 2] = 255; o[i + 3] = 215; }
     else if (d > 38) { bright++; o[i] = 255; o[i + 1] = 159; o[i + 2] = 26; o[i + 3] = 215; }
   }
-  if (valid < 0.2 * N) return { kind: 'radar', thin: 1, overlap: valid / N, both: 1 };
-  return { kind: 'radar', img, dark: dark * px, bright: bright * px, view: valid * px, overlap: valid / N, share: valid ? (dark + bright) / valid : 0 };
+  if (valid < 0.2 * N) return { kind: 'radar', thin: 1, overlap: valid / N, both: 1, ...cov };
+  return { kind: 'radar', img, ...cov, dark: dark * px, bright: bright * px, view: valid * px, overlap: valid / N, share: valid ? (dark + bright) / valid : 0 };
 }
 function labTiles(rows) {
   const el = $('labStats'); el.textContent = ''; el.hidden = !rows.length;
@@ -2044,12 +2051,15 @@ function labStory(e, r, st) { // plain-language reading of the numbers, phrased 
   else if (st.kind === 'water' && !st.thin) {
     if (st.wb == null) out.push(['h', 'Radar mapped ' + km2Str(st.wa) + ' of open water on ' + aD + '. There is no earlier pass in range to compare with.' + passHint(r)]);
     else {
-      const d = st.wa - st.wb, rel = st.wb > 0.5 ? d / st.wb : null, big = Math.abs(d) > Math.max(1, 0.05 * st.wb);
-      out.push(['h', 'Radar-mapped open water went from ' + km2Str(st.wb) + ' (' + bD + ') to ' + km2Str(st.wa) + ' (' + aD + ')' + (big ? ': ' + (d > 0 ? '+' : '−') + km2Str(Math.abs(d)) + (rel != null ? ' (' + (d > 0 ? '+' : '−') + pct(Math.abs(rel)) + ')' : '') : ', almost no change') + ', within ' + lab.km + ' km of the event.']);
+      // permanent water — sea, a lake, a reservoir — is counted in both passes, so it tells us nothing. Lead with what moved.
+      const floor = Math.max(1.5, 0.03 * st.wb), grew = st.gain > floor, shrank = st.loss > floor;
+      const salty = st.view > 0 && st.wb > 0.25 * st.view;
+      out.push(['h', 'Between ' + bD + ' and ' + aD + ', radar mapped ' + km2Str(st.gain) + ' of new water and ' + km2Str(st.loss) + ' gone, within ' + lab.km + ' km of the event. Standing water in view: ' + km2Str(st.wb) + ' → ' + km2Str(st.wa) + '.']);
       if (r.pre) out.push(['', 'Both passes are from before the event, so this is the baseline: the normal level of change here.' + (passHint(r) || ' Come back after the next pass to see the impact.')]);
-      else if (big && d > 0) out.push(['', 'Hypothesis: the pink areas on the change map (' + km2Str(st.gain) + ' that were dry on ' + bD + ') are land inundated by this event. ' + (e.type === 'drought' ? 'For a drought that would be unexpected. Check for recent rain or a reservoir release.' : 'To test it, check that the pink areas sit on low ground next to rivers or the coast and persist in the following pass.')]);
-      else if (big) out.push(['', 'Hypothesis: water has retreated (yellow on the change map). ' + (e.type === 'drought' ? 'That fits a drought drawing down lakes and reservoirs.' : 'The flood peak may have passed before ' + aD + ', or the earlier pass caught a wetter day.')]);
-      else out.push(['', 'Hypothesis: the event did not change open water inside this view by ' + aD + '. Water may have drained before the pass, lie outside the view, or hide under forest and between buildings, where C-band radar cannot see it.']);
+      else if (grew) out.push(['', 'Hypothesis: the pink areas on the change map — ' + km2Str(st.gain) + ' that was dry on ' + bD + ' — are land inundated by this event. ' + (e.type === 'drought' ? 'For a drought that would be unexpected. Check for recent rain or a reservoir release.' : 'To test it, check that the pink areas sit on low ground next to rivers or the coast and persist in the following pass.')]);
+      else if (shrank) out.push(['', 'Hypothesis: water has retreated (yellow on the change map). ' + (e.type === 'drought' ? 'That fits a drought drawing down lakes and reservoirs.' : 'The flood peak may have passed before ' + aD + ', or wind roughened the surface so radar no longer reads it as water.')]);
+      else out.push(['', 'Hypothesis: nothing here changed in a way radar can see by ' + aD + '. Both figures are within the pass-to-pass noise. Water may have drained before the pass, lie outside the view, or hide under forest and between buildings, where C-band radar cannot see it.']);
+      if (salty) out.push(['', 'Note: ' + pct(st.wb / st.view) + ' of this view is permanent water — sea, a lake or a reservoir. It is counted in both passes and drowns the signal, so judge this case by the new-water figure alone, not by the total.']);
     }
     if (!r.L.sar) out.push(['', 'The radar water product has no data here for these dates, so this view uses the optical OPERA product instead. Clouds leave gaps in it.']);
   } else if (st.kind === 'radar' && !st.thin) {
@@ -2070,7 +2080,9 @@ function labStory(e, r, st) { // plain-language reading of the numbers, phrased 
 function labRender(r) {
   const e = lab.e, st = lab.st = labAnalyse(r), aD = fmtDay(Date.parse(r.a)), bD = r.b ? fmtDay(Date.parse(r.b)) : '';
   labPaint(labCB, r.ib || null); labPaint(labCA, r.ia); labCD.clearRect(0, 0, LAB_N, LAB_N);
-  labTagB.textContent = r.b ? 'BEFORE · ' + bD : 'NO EARLIER PASS'; labTagA.textContent = (r.pre ? 'LATEST · ' : 'AFTER · ') + aD;
+  const part = c => c != null && c < 0.85 ? ' · ' + pct(c) + ' COVERED' : '';
+  labTagB.textContent = r.b ? 'BEFORE · ' + bD + part(st.covB) : 'NO EARLIER PASS';
+  labTagA.textContent = (r.pre ? 'LATEST · ' : 'AFTER · ') + aD + part(st.covA);
   labView.classList.remove('loading'); labMsg.textContent = '';
   const hasMap = !!st.img; labDiff.hidden = !hasMap; if (hasMap) labCD.putImageData(st.img, 0, 0);
   $('labD').style.opacity = hasMap && labDiff.getAttribute('aria-pressed') === 'true' ? 1 : 0;
@@ -2078,8 +2090,8 @@ function labRender(r) {
   if (st.thin) { labKeyRow([]); labTiles([]); }
   else if (st.kind === 'water') {
     labKeyRow([['#2a5cff', 'Water'], ['#ff3f8c', 'New water'], ['#ffd166', 'Water gone']]);
-    const d = st.wb == null ? null : st.wa - st.wb;
-    labTiles([[st.wb == null ? '–' : km2Str(st.wb), 'Water before'], [km2Str(st.wa), r.pre ? 'Water, latest pass' : 'Water after'], [d == null ? '–' : (d >= 0 ? '+' : '−') + km2Str(Math.abs(d)), 'Change', d == null || Math.abs(d) < 0.01 ? '' : d > 0 ? 'up' : 'down']]);
+    if (st.wb == null) labTiles([[km2Str(st.wa), r.pre ? 'Water, latest pass' : 'Water mapped'], ['–', 'New water'], ['–', 'Water gone']]);
+    else labTiles([[km2Str(st.gain), 'New water', st.gain > 0.005 ? 'up' : ''], [km2Str(st.loss), 'Water gone', st.loss > 0.005 ? 'down' : ''], [km2Str(st.wb), 'Standing water before']]);
   } else if (st.kind === 'radar' && !st.single) {
     labKeyRow([['#4d9bff', 'Echo weaker: smoother or wetter'], ['#ff9f1a', 'Echo stronger: rougher']]);
     labTiles([[pct(st.share), 'Of the view changed'], [km2Str(st.dark), 'Darker'], [km2Str(st.bright), 'Brighter']]);
@@ -2098,6 +2110,9 @@ function labRender(r) {
     p.textContent = passes.length + ' radar acquisition days in the catalogue around this event, ' + (n ? n + ' since it began.' : 'none since it began yet.') +
       (nx ? nx.due ? ' Next pass due about now.' : ' About every ' + nx.gap + ' days; next expected around ' + fmtDay(nx.t) + '.' : '') + ' Source: NASA CMR, ' + r.L.cmr + '.'; ps.appendChild(p);
   } else { const p = document.createElement('p'); p.textContent = 'The NASA catalogue did not answer, so the dates were found by checking the imagery day by day.'; ps.appendChild(p); }
+  const hint = $('labHint');
+  hint.textContent = r.b ? 'Drag the divider back and forth over one spot — the change blinks under your finger. Grey-brown ground with no colour on it is the backdrop map, not radar data.'
+                         : 'Only one pass is shown, so there is nothing to slide between yet.';
   $('labWv').href = wvUrl(lab.box, r.a, r.L.id);
 }
 async function labLoad() {
