@@ -385,6 +385,7 @@ body.lab-open #menuBtn,body.lab-open #zoomCtl,body.lab-open #scaleHud,body.lab-o
     <details><summary>Method and limits</summary><ul>
       <li><b>Data.</b> NASA OPERA products made from Sentinel-1 C-band synthetic aperture radar (5.5 cm wavelength, VV and VH polarisation), served by NASA GIBS. Pass dates come from NASA's Common Metadata Repository.</li>
       <li><b>Water.</b> OPERA DSWx-S1 classifies each 30 m pixel. EarthPulse counts only the open-water class (blue) in the pass before and the pass after, and converts the difference to km². The product also marks partial and vegetated water in other colours; those are left out, so the figure is a floor, not a ceiling.</li>
+      <li><b>Pass dates.</b> A date is any Sentinel-1 acquisition near this point. Different orbits view the ground from different angles, so dates close together are not always comparable views of the same footprint.</li>
       <li><b>Permanent water.</b> Sea, lakes and reservoirs appear in both passes and cancel out. Judge a case by the new-water figure, never by the total.</li>
       <li><b>Radar.</b> OPERA RTC-S1 is terrain-corrected backscatter. EarthPulse smooths speckle, subtracts before from after and flags pixels whose brightness changed strongly.</li>
       <li><b>Limits.</b> Figures are a screening estimate at preview resolution, not a survey. Wind-roughened water, wet soil, crops being harvested and steep terrain can all look like change. C-band radar cannot see water under dense forest or between tall buildings. The pass after an event may come days later.</li>
@@ -1917,10 +1918,11 @@ function nextPass(ps) { // typical gap between passes here, rolled forward from 
   if (t < now - 864e5) { while (t < now) t += med * 864e5; return { t, gap: med, late: 1 }; }
   return { t, gap: med, due: t <= now + 864e5 };
 }
+const everyNth = g => g === 1 ? 'about every day' : 'about every ' + g + ' days';
 function passHint(r) {
   const n = nextPass(r && r.cand && r.cand.passes); if (!n) return '';
   if (n.due) return ' The next radar pass is due about now, so check back shortly.';
-  return ' Radar returns here about every ' + n.gap + ' days; the next pass is expected around ' + fmtDay(n.t) + ' — come back then to see the change.';
+  return ' Radar returns here ' + everyNth(n.gap) + '; the next pass is expected around ' + fmtDay(n.t) + ' — come back then to see the change.';
 }
 const $ = id => document.getElementById(id);
 const labEl = $('lab'), labView = $('labView'), labRange = $('labRange'), labMsg = labView.querySelector('.msg'), labTagB = labView.querySelector('.tb'), labTagA = labView.querySelector('.ta');
@@ -2059,7 +2061,9 @@ function labStory(e, r, st) { // plain-language reading of the numbers, phrased 
       else if (grew) out.push(['', 'Hypothesis: the pink areas on the change map — ' + km2Str(st.gain) + ' that was dry on ' + bD + ' — are land inundated by this event. ' + (e.type === 'drought' ? 'For a drought that would be unexpected. Check for recent rain or a reservoir release.' : 'To test it, check that the pink areas sit on low ground next to rivers or the coast and persist in the following pass.')]);
       else if (shrank) out.push(['', 'Hypothesis: water has retreated (yellow on the change map). ' + (e.type === 'drought' ? 'That fits a drought drawing down lakes and reservoirs.' : 'The flood peak may have passed before ' + aD + ', or wind roughened the surface so radar no longer reads it as water.')]);
       else out.push(['', 'Hypothesis: nothing here changed in a way radar can see by ' + aD + '. Both figures are within the pass-to-pass noise. Water may have drained before the pass, lie outside the view, or hide under forest and between buildings, where C-band radar cannot see it.']);
-      if (salty) out.push(['', 'Note: ' + pct(st.wb / st.view) + ' of this view is permanent water — sea, a lake or a reservoir. It is counted in both passes and drowns the signal, so judge this case by the new-water figure alone, not by the total.']);
+      if (salty) out.push(['', st.wb > 0.8 * st.view
+        ? 'Note: almost this whole view is open water — the event is at sea or on a large lake. Water extent cannot describe it, so the figures above say nothing about this event. Try the Radar view instead.'
+        : 'Note: ' + pct(st.wb / st.view) + ' of this view is permanent water — sea, a lake or a reservoir. It is counted in both passes and drowns the signal, so judge this case by the new-water figure alone, not by the total.']);
     }
     if (!r.L.sar) out.push(['', 'The radar water product has no data here for these dates, so this view uses the optical OPERA product instead. Clouds leave gaps in it.']);
   } else if (st.kind === 'radar' && !st.thin) {
@@ -2108,7 +2112,7 @@ function labRender(r) {
     const p = document.createElement('p'), n = passes.filter(q => q.t >= e.t).length;
     const nx = nextPass(passes);
     p.textContent = passes.length + ' radar acquisition days in the catalogue around this event, ' + (n ? n + ' since it began.' : 'none since it began yet.') +
-      (nx ? nx.due ? ' Next pass due about now.' : ' About every ' + nx.gap + ' days; next expected around ' + fmtDay(nx.t) + '.' : '') + ' Source: NASA CMR, ' + r.L.cmr + '.'; ps.appendChild(p);
+      (nx ? nx.due ? ' Next pass due about now.' : ' Acquisitions ' + everyNth(nx.gap) + '; next expected around ' + fmtDay(nx.t) + '.' : '') + ' Source: NASA CMR, ' + r.L.cmr + '.'; ps.appendChild(p);
   } else { const p = document.createElement('p'); p.textContent = 'The NASA catalogue did not answer, so the dates were found by checking the imagery day by day.'; ps.appendChild(p); }
   const hint = $('labHint');
   hint.textContent = r.b ? 'Drag the divider back and forth over one spot — the change blinks under your finger. Grey-brown ground with no colour on it is the backdrop map, not radar data.'
